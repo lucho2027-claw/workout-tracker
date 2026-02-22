@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: workout
+      POSTGRES_PASSWORD: workout
+      POSTGRES_DB: workout_tracker
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  api:
+    build: ./apps/api
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://workout:workout@db:5432/workout_tracker?sslmode=disable
+      JWT_SECRET: change-me
+      ALLOWED_ORIGIN: http://localhost:3000
+      APP_ENV: production
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  web:
+    build: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

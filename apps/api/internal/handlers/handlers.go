@@ -28,16 +28,27 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func decodeJSON(r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
+}
+
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req models.RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || len(req.Password) < 8 {
+	if err := decodeJSON(r, &req); err != nil || req.Email == "" || len(req.Password) < 8 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "password hashing failed"})
+		return
+	}
 	id := uuid.New()
-	_, err := h.DB.Exec(r.Context(), `INSERT INTO users (id, email, password_hash) VALUES ($1,$2,$3)`, id, req.Email, string(hash))
+	_, err = h.DB.Exec(r.Context(), `INSERT INTO users (id, email, password_hash) VALUES ($1,$2,$3)`, id, req.Email, string(hash))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email already in use"})
 		return
@@ -47,7 +58,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req models.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
+	if err := decodeJSON(r, &req); err != nil || req.Email == "" || req.Password == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
@@ -63,13 +74,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		"sub": id,
 		"exp": time.Now().Add(24 * time.Hour).Unix(),
 	})
-	signed, _ := token.SignedString([]byte(h.JWTSecret))
+	signed, err := token.SignedString([]byte(h.JWTSecret))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": signed})
 }
 
 func (h *Handler) CreateExercise(w http.ResponseWriter, r *http.Request, userID string) {
 	var req models.ExerciseCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+	if err := decodeJSON(r, &req); err != nil || req.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
@@ -102,7 +117,7 @@ func (h *Handler) ListExercises(w http.ResponseWriter, r *http.Request, userID s
 
 func (h *Handler) CreateWorkout(w http.ResponseWriter, r *http.Request, userID string) {
 	var req models.WorkoutCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PerformedAt == "" {
+	if err := decodeJSON(r, &req); err != nil || req.PerformedAt == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
@@ -124,7 +139,7 @@ func (h *Handler) CreateWorkout(w http.ResponseWriter, r *http.Request, userID s
 
 func (h *Handler) AddWorkoutSet(w http.ResponseWriter, r *http.Request, workoutID string) {
 	var req models.SetCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ExerciseID == "" || req.SetNumber < 1 || req.Reps < 1 {
+	if err := decodeJSON(r, &req); err != nil || req.ExerciseID == "" || req.SetNumber < 1 || req.Reps < 1 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
