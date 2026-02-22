@@ -5,5 +5,17 @@
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100;
+  @apply bg-zinc-950 text-zinc-100 antialiased;
+}
+
+h1,h2,h3,h4 {
+  @apply tracking-tight;
+}
+
+p {
+  @apply leading-relaxed;
+}
+
+label {
+  @apply text-sm font-medium text-zinc-300;
 }
