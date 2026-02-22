@@ -3,7 +3,7 @@
 Fullstack workout tracking app.
 
 ## Stack
-- Backend: Go + Gin + PostgreSQL
+- Backend: Go stdlib `net/http` + PostgreSQL
 - Frontend: Next.js (App Router) + TypeScript
 
 ## Monorepo layout
