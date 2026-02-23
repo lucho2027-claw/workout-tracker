@@ -11,6 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <h1 className="text-2xl font-bold tracking-tight">Workout Tracker</h1>
             <nav className="mt-3 flex gap-4 text-sm text-zinc-300">
               <Link className="hover:text-white" href="/">Home</Link>
+              <Link className="hover:text-white" href="/register">Register</Link>
               <Link className="hover:text-white" href="/login">Login</Link>
               <Link className="hover:text-white" href="/dashboard">Dashboard</Link>
               <Link className="hover:text-white" href="/workouts/new">Log workout</Link>
