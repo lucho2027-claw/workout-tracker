@@ -5,7 +5,7 @@ Fullstack workout tracking app.
 ## Stack
 - Backend: Go stdlib `net/http` + PostgreSQL
 - Frontend: Next.js (App Router) + TypeScript + Tailwind v4
-- SQL bridge: `sqlc` (configured in `apps/api/sqlc.yaml`)
+- SQL bridge: `sqlc`-style query layer (`apps/api/internal/db/sqlcdb`) with `sqlc` config/queries in repo
 
 ## Monorepo layout
 - `apps/api` Go API
@@ -79,7 +79,7 @@ cd apps/api
 sqlc generate
 ```
 
-> Note: current handlers still include direct SQL calls. Next refactor step is to switch handlers to generated `sqlc` query methods completely.
+Handlers now use the `sqlcdb` query layer (no inline SQL in handlers). You can replace/refresh this package with generated output when `sqlc` is available in your environment.
 
 ---
 

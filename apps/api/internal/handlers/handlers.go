@@ -10,16 +10,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/lucho2027/workout-tracker/apps/api/internal/db/sqlcdb"
 	"github.com/lucho2027/workout-tracker/apps/api/internal/models"
 )
 
 type Handler struct {
 	DB        *pgxpool.Pool
+	Q         *sqlcdb.Queries
 	JWTSecret string
 }
 
 func New(db *pgxpool.Pool, jwtSecret string) *Handler {
-	return &Handler{DB: db, JWTSecret: jwtSecret}
+	return &Handler{DB: db, Q: sqlcdb.New(db), JWTSecret: jwtSecret}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -48,7 +50,11 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := uuid.New()
-	_, err = h.DB.Exec(r.Context(), `INSERT INTO users (id, email, password_hash) VALUES ($1,$2,$3)`, id, req.Email, string(hash))
+	_, err = h.Q.CreateUser(r.Context(), sqlcdb.CreateUserParams{
+		ID:           id,
+		Email:        req.Email,
+		PasswordHash: string(hash),
+	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email already in use"})
 		return
@@ -63,15 +69,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var id, hash string
-	err := h.DB.QueryRow(r.Context(), `SELECT id::text, password_hash FROM users WHERE email=$1`, req.Email).Scan(&id, &hash)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
+	u, err := h.Q.GetUserByEmail(r.Context(), req.Email)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": id,
+		"sub": u.ID.String(),
 		"exp": time.Now().Add(24 * time.Hour).Unix(),
 	})
 	signed, err := token.SignedString([]byte(h.JWTSecret))
@@ -89,8 +94,20 @@ func (h *Handler) CreateExercise(w http.ResponseWriter, r *http.Request, userID 
 		return
 	}
 
+	uuidUser, err := uuid.Parse(userID)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid subject"})
+		return
+	}
+
 	id := uuid.New()
-	_, err := h.DB.Exec(r.Context(), `INSERT INTO exercises (id,user_id,name,muscle_group,notes) VALUES ($1,$2,$3,$4,$5)`, id, userID, req.Name, req.MuscleGroup, req.Notes)
+	_, err = h.Q.CreateExercise(r.Context(), sqlcdb.CreateExerciseParams{
+		ID:          id,
+		UserID:      uuidUser,
+		Name:        req.Name,
+		MuscleGroup: req.MuscleGroup,
+		Notes:       req.Notes,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -99,18 +116,16 @@ func (h *Handler) CreateExercise(w http.ResponseWriter, r *http.Request, userID 
 }
 
 func (h *Handler) ListExercises(w http.ResponseWriter, r *http.Request, userID string) {
-	rows, err := h.DB.Query(r.Context(), `SELECT id::text,name,muscle_group,notes FROM exercises WHERE user_id=$1 ORDER BY created_at DESC`, userID)
+	uuidUser, err := uuid.Parse(userID)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid subject"})
+		return
+	}
+
+	items, err := h.Q.ListExercisesByUser(r.Context(), uuidUser)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
-	}
-	defer rows.Close()
-
-	items := []map[string]string{}
-	for rows.Next() {
-		var id, name, mg, notes string
-		_ = rows.Scan(&id, &name, &mg, &notes)
-		items = append(items, map[string]string{"id": id, "name": name, "muscle_group": mg, "notes": notes})
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -128,8 +143,18 @@ func (h *Handler) CreateWorkout(w http.ResponseWriter, r *http.Request, userID s
 		return
 	}
 
+	uuidUser, err := uuid.Parse(userID)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid subject"})
+		return
+	}
+
 	id := uuid.New()
-	_, err = h.DB.Exec(r.Context(), `INSERT INTO workout_sessions (id,user_id,performed_at) VALUES ($1,$2,$3)`, id, userID, t)
+	_, err = h.Q.CreateWorkoutSession(r.Context(), sqlcdb.CreateWorkoutSessionParams{
+		ID:          id,
+		UserID:      uuidUser,
+		PerformedAt: t,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -144,8 +169,26 @@ func (h *Handler) AddWorkoutSet(w http.ResponseWriter, r *http.Request, workoutI
 		return
 	}
 
+	sessionUUID, err := uuid.Parse(workoutID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workout id"})
+		return
+	}
+	exerciseUUID, err := uuid.Parse(req.ExerciseID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid exercise id"})
+		return
+	}
+
 	id := uuid.New()
-	_, err := h.DB.Exec(r.Context(), `INSERT INTO workout_sets (id,session_id,exercise_id,set_number,reps,weight) VALUES ($1,$2,$3,$4,$5,$6)`, id, workoutID, req.ExerciseID, req.SetNumber, req.Reps, req.Weight)
+	_, err = h.Q.CreateWorkoutSet(r.Context(), sqlcdb.CreateWorkoutSetParams{
+		ID:         id,
+		SessionID:  sessionUUID,
+		ExerciseID: exerciseUUID,
+		SetNumber:  int32(req.SetNumber),
+		Reps:       int32(req.Reps),
+		Weight:     req.Weight,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
